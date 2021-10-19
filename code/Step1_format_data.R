@@ -72,12 +72,49 @@ data <- data_orig %>%
   mutate(season1=recode(season1, "all season"="all seasons", "multiple"="multiple seasons"),
          season2=tolower(season2),
          season2=recode(season2,
-                       "all season"="all seasons")) %>%
+                        "all season"="all seasons")) %>%
   # Format taxonomy
   rename(taxa1=taxa_general, taxa2=taxa) %>%
-  mutate(taxa2=gsub("_ |_", "/", taxa2)) %>%
+  mutate(taxa2=gsub("_ |_", "/", taxa2),
+         taxa1=ifelse(is.na(taxa1) & taxa2=="crustacean", "invertebrate", taxa1)) %>%
+  # Format species name
+  mutate(species=gsub("_ ", ", ", species),
+         species=stringr::str_squish(species),
+         species=recode(species,
+                        "Cyprinodon variegatus"="Cyprinodon variegatus",
+                        "Gobionellus shufeldti"="Ctenogobius shufeldti",
+                        "Haemulon plumieri"="Haemulon plumierii",
+                        "Monacanthus hispidus"="Stephanolepis hispida",
+                        "Dyspanopeus texana"="Dyspanopeus texanus",
+                        "Metacarcinus gracilis"="Metacarcinus gracilis",
+                        "Anchoa mischilli"="Anchoa mitchilli",
+                        "Brevoorita patronus"="Brevoortia patronus",
+                        "Cynoscion nebulous"="Cynoscion nebulosus",
+                        "Leiosomus xanthurus"="Leiostomus xanthurus",
+                        "Micropogonias undulates"="Micropogonias undulatus",
+                        "Ophinodon elongatus"="Ophiodon elongatus",
+                        "Panopeus depressus"="Eurypanopeus depressus",
+                        "Paralichithys lethostigma"="Paralichthys lethostigma",
+                        "Pontinus longispinus"="Pontinus longispinis",
+                        "Scomberomorus maculates"="Scomberomorus maculatus",
+                        "Syngnathus scoveili"="Syngnathus scovelli",
+                        "Urophcis tenuis"="Urophycis tenuis")) %>%
   # Format common name
   rename(comm_name=common_name) %>%
+  mutate(comm_name=gsub("_ ", ", ", comm_name),
+         comm_name=stringr::str_squish(comm_name),
+         comm_name=stringr::str_to_sentence(comm_name),
+         comm_name=recode(comm_name,
+                          "Atlantic tompcod"="Atlantic tomcod",
+                          "Gafftopsail sea catfish"="Gafftopsail catfish",
+                          "Inshore lizzardfish"="Inshore lizardfish",
+                          "Sand seatrout"="Sand weakfish",
+                          "Spotted seatrout"="Spotted weakfish",
+                          "Skillet fish"="Skilletfish",
+                          "Feathered blenny"="Feather blenny")) %>%
+  # Fix a few taxonomies
+  mutate(taxa1=ifelse(comm_name=="Northern white shrimp", "invertebrate", taxa1),
+         taxa2=ifelse(comm_name=="Northern white shrimp", "crustacean", taxa2)) %>%
   # Format life stage
   rename(lifestage1=lifestage_origil,
          lifestage2=lifestage_mod,
@@ -86,6 +123,11 @@ data <- data_orig %>%
          lifestage2=tolower(lifestage2),
          lifestage3=tolower(lifestage3),
          lifestage_info=gsub("_ ", "/", lifestage_info)) %>%
+  # Format habitat
+  mutate(habitat_struct=gsub("_ ", "/", habitat_struct),
+         habitat_control=tolower(habitat_control)) %>%
+  # Format habitat species
+  mutate(habitat_species=gsub("_ ", ", ", habitat_species)) %>%
   # Remove less important columns
   # species_note=empty, coord=redundant
   select(-c(order, database_origin, data_extract, coord, species_note)) %>%
@@ -108,6 +150,7 @@ data <- data_orig %>%
 
 # Inspect data
 str(data)
+freeR::complete(data)
 
 # Is ID unique?
 anyDuplicated(data$id) # must be 0
@@ -143,6 +186,16 @@ taxa_key <- data %>%
   unique() %>%
   arrange(taxa1, taxa2, comm_name)
 
+# Any duplicated taxa?
+freeR::which_duplicated(taxa_key$species)
+freeR::which_duplicated(taxa_key$comm_name)
+
+
+# Check names
+names_wrong <- freeR::check_names(taxa_key$species)
+names_wrong_no_comma <- names_wrong[!grepl(",|spp", names_wrong)]
+# freeR::suggest_names(names_wrong_no_comma)
+
 # Life stage
 sort(unique(data$lifestage1))
 sort(unique(data$lifestage2))
@@ -168,10 +221,33 @@ sort(unique(data$do_unit)) # standardizable?
 # Depth
 sort(unique(data$depth_standard)) # standardizable?
 
+# Tidal zones
+sort(unique(data$tidal_zone_cont))
+sort(unique(data$tidal_zone_struct))
+sort(unique(data$tidal_zone_struct_org))
+
+# Habitat
+sort(unique(data$habitat_struct))
+sort(unique(data$habitat_struct_2))
+sort(unique(data$habitat_species))
+sort(unique(data$habitat_control)) # are unvegetated, unvegetated (open water), and nonvegetated all the same?
+sort(unique(data$habitat_interfacing))
+sort(unique(data$habitat_natural_status))
+sort(unique(data$habitat_natural_info))
+sort(unique(data$habitat_edge))
+sort(unique(data$habitat_connectivity_dist)) # complex strings - could be broken apart
+sort(unique(data$habitat_connectivity_general))
+sort(unique(data$restoration_method))
 
 
+# Export data
+################################################################################
 
-# 2. Learn about data
+# Export
+saveRDS(data, file=file.path(datadir, "lenfest_data.Rds"))
+
+
+# Plot data
 ################################################################################
 
 # World
@@ -237,144 +313,4 @@ ggplot(data_coverage_ordered, aes(y=id, x=variable, fill=value)) +
   theme_bw() +
   theme(axis.text.y=element_blank(),
         legend.position = "bottom")
-
-
-# 3. Split data
-################################################################################
-
-# Training data
-data_train_no_nas <- data %>%
-  # Reduce to observations with a response variable
-  filter(!is.na(lrr) & !is.na(sal_mean) & !is.na(depth_mean) & !is.na(temp_mean))
-
-# Training data with NAs
-data_train_nas <- data %>%
-  # Simplify
-  select(lrr, sal_mean, depth_mean, temp_mean) %>%
-  # Reduce to observations with a response variable
-  filter(!is.na(lrr))
-
-# Impute NAs
-data_train_imputed <- data_train_nas %>%
-  rfImpute(lrr ~ ., .)
-
-# Prediction data
-data_pred <- data %>%
-  filter(is.na(lrr))
-
-
-# 4. Fit model
-################################################################################
-
-# Define tuning parameter grid
-# mtry = Number of variables randomly sampled as candidate variables
-fitGrid <- expand.grid(mtry=seq(4, 12, 4))
-
-# Define tuning and training method
-fitControl <- caret::trainControl(method="repeatedcv", number=10, repeats=10)
-
-# Train RF model
-rf_fit <- caret::train(lrr ~ sal_mean + temp_mean + depth_mean,
-                       data=data_train_imputed,
-                       method="rf",
-                       metric="RMSE",
-                       tuneGrid=fitGrid, trControl=fitControl, verbose=F)
-
-
-# 5. Inspect model fit
-################################################################################
-
-
-
-
-# 6. Inspect variable importance
-################################################################################
-
-# Functions for extracting variable importance
-# caret::varImp()
-# randomForest::importance()
-# randomForest::varImpPlot()
-
-# Extract variable importance
-var_imp_list <- caret::varImp(rf_fit)
-
-# Format variable importance
-var_imp_df <- var_imp_list[[1]] %>%
-  # Add variable
-  rownames_to_column(var="variable") %>%
-  # Rename importance columns
-  rename(importance=Overall) %>%
-  # Arrange columns
-  select(variable, importance) %>%
-  # Arrange rows
-  arrange(desc(importance))
-
-# Plot variable importance
-ggplot(var_imp_df, aes(x=importance, y=reorder(variable, importance))) +
-  geom_bar(stat="identity") +
-  # Labels
-  labs(x="Importance", y="", title="Variable importance") +
-  # Theme
-  theme_bw()
-
-# Random forest method
-varImpPlot(rf_fit$finalModel)
-
-
-# 7. Inspect marginal effects
-################################################################################
-
-# Functions for extracting marginal effects (partial dependence)
-# pdp::partial() - listing more than 1 computes interaction
-# edarf::partial_dependence() - this package is not maintained
-# randomForest::margin()
-
-# Extract marginal effects
-variables_do <- c("sal_mean", "temp_mean", "depth_mean")
-pdp_df_orig <- purrr::map_df(variables_do, function(x){
-
-  # Compute marginal effects for predictor
-  df <- pdp::partial(rf_fit, pred.var=x)
-
-  # Format
-  df1 <- df %>%
-    # Convert to dataframe
-    as.matrix() %>%
-    as.data.frame() %>%
-    # Rename columns
-    setNames(c("value", "yhat")) %>%
-    # Add variable
-    mutate(variable=x) %>%
-    # Arrange
-    select(variable, value, yhat)
-
-
-})
-
-# Plot marginal effects
-ggplot(pdp_df_orig, mapping=aes(x=value, y=yhat)) +
-  facet_wrap(~variable, scales="free_x") +
-  geom_line() +
-  # Labels
-  labs(x="Variable value", y="Marginal effect") +
-  # Theme
-  theme_bw()
-
-
-# 8. Make predictions
-################################################################################
-
-# Predict LRRs for sites without LRRs
-# (not currently predicting to sites with NA values)
-?predict.randomForest
-lrr_preds <- predict(rf_fit, newdata=data_pred)
-
-
-
-
-
-
-
-
-
 
