@@ -23,6 +23,13 @@ data <- readRDS(file.path(datadir, "lenfest_data.Rds"))
 # A nice guide
 # https://topepo.github.io/caret/variable-importance.html
 
+# Steps
+# 3. Split data
+# 4. Fit model
+# 5. Inspect model fit
+# 6. Inspect variable importance
+# 7. Inspect marginal effects
+# 8. Make predictions
 
 
 # 3. Split data
