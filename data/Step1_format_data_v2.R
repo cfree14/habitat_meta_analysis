@@ -15,13 +15,11 @@ library(randomForest)
 # Directories
 plotdir <- "figures"
 tabledir <- "tables"
-datadir <- "data"
+datadir <- "data/raw/v2"
+outdir <- "data/processed"
 
 # Read data
-data_orig <- readxl::read_excel(file.path(datadir, "lenfest_paired db_2021_1007_cleaned.xlsx"), na=c("NA"), sheet=1)
-
-# A nice guide
-# https://topepo.github.io/caret/variable-importance.html
+data_orig <- readxl::read_excel(file.path(datadir, "lf_paired_db_clean.xlsx"), na=c("NA"), sheet=1)
 
 
 # 1. Format data
@@ -31,54 +29,34 @@ data_orig <- readxl::read_excel(file.path(datadir, "lenfest_paired db_2021_1007_
 data <- data_orig %>%
   # Rename
   janitor::clean_names("snake") %>%
+  rename(region=region_general,
+         season=season_general,
+         taxa_type=taxa_general,
+         species=species_ind) %>%
   # Format id
   mutate(id=1:n()) %>%
   # Format country
   mutate(country=recode(country, "USA"="United States")) %>%
   # Format region
-  rename(region1=region_general, region2=region) %>%
-  mutate(region1=gsub("coast", "Coast", region1)) %>%
-  mutate(region2=recode(region2,
-                        "Atlantic_Mid"="Mid-Atlantic",
-                        "Atlantic_MID"="Mid-Atlantic",
-                        "Atlantic_NE"="Northeast Atlantic",
-                        "Atlantic_SE"="Southeast Atlantic",
-                        "Gulf of Mexico_N"="Northern Gulf of Mexico",
-                        "Gulf of Mexico_NE"="Northeastern Gulf of Mexico",
-                        "Gulf of Mexico_SW"="Southwestern Gulf of Mexico",
-                        "Pacific_NW"="Northwest Pacific",
-                        "Pacific_SW"="Southwest Pacific")) %>%
+  mutate(region=gsub("coast", "Coast", region)) %>%
   # Format state
-  mutate(state=stringr::str_to_title(state),
-         state=recode(state, "Virginia_ Maryland"="Virginia/Maryland")) %>%
+  mutate(state=stringr::str_to_title(state)) %>%
   # Format location
-  mutate(location=gsub("_ ", "/", location)) %>%
-  # Format site
-  mutate(site=gsub("_ ", "/", site),
-         site=stringr::str_to_title(site)) %>%
+  # Could be cleaned up futher
+  mutate(location=gsub("_", "/", location)) %>%
   # Format coordinates
-  # separate(col=coord, sep=" ", into=c("lat_dd", "long_dd"), remove=F) %>%
-  # mutate(lat_dd=as.numeric(lat_dd),
-  #        long_dd=as.numeric(long_dd)) %>%
+  select(-coord) %>%
   rename(lat_dd=lat, long_dd=long) %>%
   # Format reference
   mutate(reference=gsub("&", "and", reference),
-         reference=gsub("et al ", "et al. ", reference),
+         reference=gsub("et al |et al., ", "et al. ", reference),
+         reference=gsub("_|,", "", reference),
          reference=recode(reference,
-                          "Lazzari_ 2002"="Lazzari 2002",
-                          "Sheridan_ Henderson_ McMahan 2003"="Sheridan, Henderson, and McMahan 2003")) %>%
-  # Format season
-  rename(season1=season_general, season2=season) %>%
-  mutate(season1=recode(season1, "all season"="all seasons", "multiple"="multiple seasons"),
-         season2=tolower(season2),
-         season2=recode(season2,
-                        "all season"="all seasons")) %>%
-  # Format taxonomy
-  rename(taxa1=taxa_general, taxa2=taxa) %>%
-  mutate(taxa2=gsub("_ |_", "/", taxa2),
-         taxa1=ifelse(is.na(taxa1) & taxa2=="crustacean", "invertebrate", taxa1)) %>%
+                          "Sheridan Henderson McMahan 2003"="Sheridan, Henderson, and McMahan 2003")) %>%
+  # Format year
+  mutate(year=gsub(" - ", "-", year)) %>%
   # Format species name
-  mutate(species=gsub("_ ", ", ", species),
+  mutate(species=gsub("_", " ", species),
          species=stringr::str_squish(species),
          species=recode(species,
                         "Cyprinodon variegatus"="Cyprinodon variegatus",
@@ -99,53 +77,25 @@ data <- data_orig %>%
                         "Scomberomorus maculates"="Scomberomorus maculatus",
                         "Syngnathus scoveili"="Syngnathus scovelli",
                         "Urophcis tenuis"="Urophycis tenuis")) %>%
-  # Format common name
-  rename(comm_name=common_name) %>%
-  mutate(comm_name=gsub("_ ", ", ", comm_name),
-         comm_name=stringr::str_squish(comm_name),
-         comm_name=stringr::str_to_sentence(comm_name),
-         comm_name=recode(comm_name,
-                          "Atlantic tompcod"="Atlantic tomcod",
-                          "Gafftopsail sea catfish"="Gafftopsail catfish",
-                          "Inshore lizzardfish"="Inshore lizardfish",
-                          "Sand seatrout"="Sand weakfish",
-                          "Spotted seatrout"="Spotted weakfish",
-                          "Skillet fish"="Skilletfish",
-                          "Feathered blenny"="Feather blenny")) %>%
-  # Fix a few taxonomies
-  mutate(taxa1=ifelse(comm_name=="Northern white shrimp", "invertebrate", taxa1),
-         taxa2=ifelse(comm_name=="Northern white shrimp", "crustacean", taxa2)) %>%
-  # Format life stage
-  rename(lifestage1=lifestage_origil,
-         lifestage2=lifestage_mod,
-         lifestage3=lifestage_mod_fil) %>%
-  mutate(lifestage1=tolower(lifestage1),
-         lifestage2=tolower(lifestage2),
-         lifestage3=tolower(lifestage3),
-         lifestage_info=gsub("_ ", "/", lifestage_info)) %>%
-  # Format habitat
-  mutate(habitat_struct=gsub("_ ", "/", habitat_struct),
-         habitat_control=tolower(habitat_control)) %>%
-  # Format habitat species
-  mutate(habitat_species=gsub("_ ", ", ", habitat_species)) %>%
+  # Format sampling type
+  mutate(sampling_type=gsub("_ |_", "/", sampling_type) %>% tolower()) %>%
   # Remove less important columns
-  # species_note=empty, coord=redundant
-  select(-c(order, database_origin, data_extract, coord, species_note)) %>%
+  select(-c(no, x1)) %>%
   # Rearrange columns
   # Site attributes, response attributes, predictor attributes
-  select(country, region1, region2, state, location, site, lat_dd, long_dd, # site
+  select(id, country, region, state, location, lat_dd, long_dd, # site
          reference, study_id, # reference
-         year, season1, season2, # year/season
-         taxa1, taxa2, comm_name,  species, # taxa
-         lifestage1, lifestage2, lifestage3, lifestage_info, size, unit, # lifestage
-         sampling_type, sampling_gear, mesh_size, # sampling info
+         year, season, season, # year/season
+         taxa_type, family, genus, species, # taxa
+         lifestage, # lifestage
+         sampling_type, # sampling info
          # Habitat
          coastal_estuarine,
          # Environmental
-         sal_regime:sal_unit, # salinity
-         temp_mean:temp_range, # temperature
-         do_mean:do_unit, # dissolved oxygen
-         depth_mean:depth_standard, # depth
+         # sal_regime:sal_unit, # salinity
+         # temp_mean:temp_range, # temperature
+         # do_mean:do_unit, # dissolved oxygen
+         # depth_mean:depth_standard, # depth
          everything())
 
 # Inspect data
@@ -157,12 +107,9 @@ anyDuplicated(data$id) # must be 0
 
 # Inspect site info
 table(data$country)
-table(data$region1)
-table(data$region2)
+table(data$region)
 table(data$state)
 table(data$location)
-table(data$site)
-table(data$coord)
 
 # Inspect reference info
 sort(unique(data$reference))
@@ -170,25 +117,25 @@ sort(unique(data$study_id))
 
 # Time of year
 sort(unique(data$year))
-table(data$season1)
-table(data$season2)
+table(data$season)
 
 # Taxonomic info
-table(data$taxa1)
-table(data$taxa2)
-sort(unique(data$common_name))
+table(data$taxa_type)
+table(data$family)
+table(data$genus)
 sort(unique(data$species))
+
+sort(unique(data$common_name))
 
 # Build taxa key
 # Lots of work to do on this
 taxa_key <- data %>%
-  select(taxa1, taxa2, comm_name, species) %>%
+  select(taxa_type, family, genus, species) %>%
   unique() %>%
-  arrange(taxa1, taxa2, comm_name)
+  arrange(taxa_type, family, genus, species)
 
 # Any duplicated taxa?
 freeR::which_duplicated(taxa_key$species)
-freeR::which_duplicated(taxa_key$comm_name)
 
 
 # Check names
@@ -197,34 +144,17 @@ names_wrong_no_comma <- names_wrong[!grepl(",|spp", names_wrong)]
 # freeR::suggest_names(names_wrong_no_comma)
 
 # Life stage
-sort(unique(data$lifestage1))
-sort(unique(data$lifestage2))
-sort(unique(data$lifestage3))
-sort(unique(data$lifestage_info))
-sort(unique(data$size))
+sort(unique(data$lifestage))
 
 # Sampling info
 sort(unique(data$sampling_type))
-sort(unique(data$sampling_gear))
-sort(unique(data$mesh_size))
 
 # Habitat info
 table(data$coastal_estuarine)
 
 # Salinity
 sort(unique(data$sal_regime))
-sort(unique(data$sal_unit))
 
-# Dissolved oxygen
-sort(unique(data$do_unit)) # standardizable?
-
-# Depth
-sort(unique(data$depth_standard)) # standardizable?
-
-# Tidal zones
-sort(unique(data$tidal_zone_cont))
-sort(unique(data$tidal_zone_struct))
-sort(unique(data$tidal_zone_struct_org))
 
 # Habitat
 sort(unique(data$habitat_struct))
@@ -244,7 +174,7 @@ sort(unique(data$restoration_method))
 ################################################################################
 
 # Export
-saveRDS(data, file=file.path(datadir, "lenfest_data.Rds"))
+saveRDS(data, file=file.path(outdir, "lenfest_data_v1.Rds"))
 
 
 # Plot data
@@ -260,7 +190,7 @@ ggplot() +
   # World
   geom_sf(data=world, fill="grey80", color="white", lwd=0.2) +
   # Sites
-  geom_point(data=data, mapping=aes(x=long_dd, y=lat_dd, color=region2)) +
+  geom_point(data=data, mapping=aes(x=long_dd, y=lat_dd, color=state)) +
   # Labels
   labs(x="", y="") +
   scale_fill_discrete(name="Region") +
